@@ -1,0 +1,54 @@
+RSI TREND STRATEGY - FINISHED SOFTWARE PACKAGE v1.5
+
+TRADINGVIEW
+1. Extract this complete ZIP into a new folder.
+2. Double-click COPY_STRATEGY.cmd. It copies the complete Pine code.
+3. In TradingView Pine Editor, select all, paste, save, and add to the chart.
+
+Use standard M5 candles. RSI is 9 Close. The separate yellow SMA stays 14;
+it is not used for entries. BUY requires bullish HH+HL and RSI strictly <15.
+SELL requires bearish LL+LH and RSI strictly >85. Range/unknown means no trade.
+A confirmed close below bullish support blocks a buy. Target is 2R.
+
+For your CAPITALCOM:US30 simulation, keep your reviewed quantity inputs:
+step 0.1, minimum 0.1, maximum 250, point-value override 0, risk 1%.
+Keep your existing contract-confirmation setting after checking those inputs.
+The script defaults to contract confirmation OFF on a fresh instance.
+These US30 simulation settings do not apply automatically to other symbols.
+
+The top-right table explicitly reports the last confirmed decision, including
+its UTC candle time. The separate RSI can change on the still-open candle.
+Historical diagnostic values remain available in the Data Window.
+
+WINDOWS MT5 - READ-ONLY CHECK
+Keep MT5 open on MetaQuotes-Demo and Algo Trading OFF.
+Double-click CHECK_US30_READONLY.cmd. It uses this folder's Python environment,
+or the existing one at Downloads\RSI-Trading, with that installation's .env.
+It runs both synthetic US30 sides through isolated HTTP, SQLite and the worker.
+It saves US30_READONLY_RESULT.json beside the launcher and keeps the window open.
+It refuses armed/live settings and blocks every broker write independently.
+It does not replace your .env, virtual environment or original event database.
+
+The check uses the +10800-second clock exception previously measured on
+MetaQuotes-Demo. The exact server and original quote-age limits are enforced;
+a changed clock/server or invalid account produces a rejection, not a bypass.
+
+EVIDENCE AND LIMITS
+The user's existing v1.4 compiled on US30 M5. At Sep 30 11:15 UTC, built-in RSI
+was 9.26 and the strategy displayed 9.3; its state was BEARISH, so no BUY.
+The code must not force that trade against the confirmed bullish-only rule.
+The 20,000-bar broker CSV audits still produce zero qualifying entry pairs.
+No profitability or exact equivalence to all earlier manual trades is claimed.
+
+This package finishes the strategy and execution-gateway software. Automated
+checks use fake brokers. Native v1.5 display/launcher checks, public HTTPS alert
+delivery, and real demo order/fill/protection checks remain external tests.
+MT5 order submission and live trading remain OFF. Do not arm them from this
+package. The check launcher performs no orders.
+
+Remaining swing selection uses documented 2-left/2-right confirmed pivots;
+equal/conflicting structure, gap resets and fresh-pivot rules remain explicit
+engineering choices. Your instruction to finish delegates implementation work,
+not evidence that those were the exact parameters in every historical trade.
+
+See docs/current-status.md for the detailed test record.

@@ -1,0 +1,345 @@
+//@version=6
+//@strategy_alert_message {{strategy.order.alert_message}}
+strategy("RSI Trend Strategy v1.5", overlay = true, pyramiding = 0,
+     calc_on_every_tick = false, calc_on_order_fills = true,
+     process_orders_on_close = true, initial_capital = 10000,
+     currency = currency.USD, default_qty_type = strategy.fixed,
+     commission_type = strategy.commission.percent, commission_value = 0.0, slippage = 0)
+
+// Thresholds, M5 and 2R come from the user. RSI 9 Close is confirmed by the
+// user's setup screenshot supplied on 2026-09-30. Other inputs remain engineering defaults.
+string GS = "Signal"
+string GT = "Market structure"
+string GR = "Simulation risk and contract"
+string GD = "Diagnostics and alerts"
+int rsiLength = input.int(9, "RSI length", minval = 2, group = GS)
+string sourceChoice = input.string("Close", "RSI price source", options = ["Close", "Open", "High", "Low", "HL2", "HLC3", "OHLC4"], group = GS)
+float rsiSource = switch sourceChoice
+    "Open" => open
+    "High" => high
+    "Low" => low
+    "HL2" => hl2
+    "HLC3" => hlc3
+    "OHLC4" => ohlc4
+    => close
+int swingBars = input.int(2, "Confirmed swing bars left and right", minval = 1, maxval = 20, group = GT)
+int stopBufferTicks = input.int(1, "Stop buffer in ticks", minval = 0, maxval = 1000, group = GT)
+float riskPct = input.float(1.0, "Simulation stop risk (%)", minval = 0.01, maxval = 5, step = 0.05, group = GR)
+bool linearContractVerified = input.bool(false, "I verified a linear contract and quantity settings", group = GR,
+     tooltip = "Review point value, quantity units/step/min/max and currency for this exact feed. Inverse/nonlinear contracts require a verified adapter. Candidate markers work before this is checked.")
+float qtyStep = input.float(0.01, "Quantity step", minval = 0.00000001, group = GR)
+float minQty = input.float(0.01, "Minimum quantity", minval = 0.00000001, group = GR)
+float maxQty = input.float(1000000, "Maximum quantity", minval = 0.00000001, group = GR)
+float pointValueOverride = input.float(0, "Point value override (0 uses feed metadata)", minval = 0, group = GR)
+float maxFillRiskOverrunPct = input.float(10, "Maximum fill risk overrun (%)", minval = 0, maxval = 100, group = GR)
+int atrLength = input.int(14, "ATR length for quality label", minval = 2, group = GD)
+float suddenAtrMultiple = input.float(1.5, "Countertrend body / ATR for quality label", minval = 0.1, group = GD)
+string instanceIdInput = input.string("RSI-M5-DEMO-1", "Unique chart instance ID", group = GD)
+bool showDiagnostics = input.bool(true, "Show diagnostics", group = GD)
+bool showCandidates = input.bool(true, "Show candidates", group = GD)
+
+int STATE_UNKNOWN = 0
+int STATE_BULLISH = 1
+int STATE_BEARISH = -1
+int STATE_RANGE = 2
+float RR = 2.0
+
+f_floor_tick(float x) =>
+    math.floor(x / syminfo.mintick + 1e-9) * syminfo.mintick
+f_ceil_tick(float x) =>
+    math.ceil(x / syminfo.mintick - 1e-9) * syminfo.mintick
+f_floor_step(float x) =>
+    math.floor(x / qtyStep + 1e-10) * qtyStep
+f_json_escape(string s) =>
+    string a = str.replace_all(s, "\\", "\\\\")
+    a := str.replace_all(a, '"', '\\"')
+    a := str.replace_all(a, "\n", "\\n")
+    a := str.replace_all(a, "\r", "\\r")
+    str.replace_all(a, "\t", "\\t")
+f_num(float x) =>
+    na(x) ? "null" : str.tostring(x, "#.################")
+f_state_name(int state) =>
+    state == STATE_BULLISH ? "BULLISH" : state == STATE_BEARISH ? "BEARISH" : state == STATE_RANGE ? "RANGE" : "UNKNOWN"
+f_target(string side, float fill, float stop) =>
+    side == "LONG" ? f_ceil_tick(fill + RR * (fill - stop)) : f_floor_tick(fill - RR * (stop - fill))
+f_payload(string kind, string side, string tradeId, int signalTime, float signalPrice, float stop, float target, float signalRsi, int state, bool sudden) =>
+    string strength = side == "SHORT" and signalRsi > 90 and sudden ? "RSI_GT_90+SUDDEN_COUNTERTREND" : side == "SHORT" and signalRsi > 90 ? "RSI_GT_90" : sudden ? "SUDDEN_COUNTERTREND" : "BASELINE"
+    string eventId = "rsi-trend|" + instanceIdInput + "|" + syminfo.tickerid + "|5|" + tradeId + "|" + kind + "|" + side
+    '{"schema_version":"1.1","strategy":"RSI Trend Strategy",' +
+      '"instance_id":"' + f_json_escape(instanceIdInput) + '",' +
+      '"event_id":"' + f_json_escape(eventId) + '",' +
+      '"event_type":"' + kind + '","side":"' + side + '",' +
+      '"ticker":"' + f_json_escape(syminfo.tickerid) + '","timeframe":"5",' +
+      '"signal_time_ms":' + str.tostring(signalTime) + ',' +
+      '"signal_price":' + f_num(signalPrice) + ',' +
+      '"structural_stop":' + f_num(stop) + ',"planned_target":' + f_num(target) + ',' +
+      '"chart_tick_size":' + f_num(syminfo.mintick) + ',"rr":2.0,' +
+      '"risk_pct":' + f_num(riskPct) + ',"rsi":' + f_num(signalRsi) + ',' +
+      '"market_state":"' + f_state_name(state) + '","strength":"' + strength + '",' +
+      '"trade_id":"' + f_json_escape(tradeId) + '"}'
+
+bool isM5 = timeframe.isminutes and timeframe.multiplier == 5
+bool supportedChart = chart.is_standard and isM5
+float rsi = ta.rsi(rsiSource, rsiLength)
+float ph = ta.pivothigh(high, swingBars, swingBars)
+float pl = ta.pivotlow(low, swingBars, swingBars)
+float atr = ta.atr(atrLength)
+
+// Fill-only executions cannot use completed historical OHLC to create signals.
+// varip preserves these guards across realtime rollback/recalculation.
+varip float observedPosition = 0
+varip int observedClosedTrades = 0
+varip int lastDecisionBar = na
+bool fillRecalculation = strategy.position_size != observedPosition or strategy.closedtrades != observedClosedTrades
+observedPosition := strategy.position_size
+observedClosedTrades := strategy.closedtrades
+bool evaluateSignal = barstate.isconfirmed and not fillRecalculation and (na(lastDecisionBar) or lastDecisionBar != bar_index)
+if evaluateSignal
+    lastDecisionBar := bar_index
+
+varip float lastHigh = na
+varip float prevHigh = na
+varip float lastLow = na
+varip float prevLow = na
+varip int structureEpoch = -1
+varip int marketState = STATE_UNKNOWN
+varip bool longArmed = true
+varip bool shortArmed = true
+varip float activeStop = na
+varip float activeTarget = na
+varip float activeFill = na
+varip float activeRiskBudget = na
+varip string activeTradeId = ""
+varip string activeSide = ""
+varip int activeSignalTime = 0
+varip float activeSignalPrice = na
+varip float activeSignalRsi = na
+varip int activeSignalState = STATE_UNKNOWN
+varip bool activeSudden = false
+
+// Clear old trade state before a later decision can create another entry.
+if fillRecalculation and strategy.position_size == 0
+    activeStop := na
+    activeTarget := na
+    activeFill := na
+    activeRiskBudget := na
+    activeTradeId := ""
+    activeSide := ""
+
+if evaluateSignal and supportedChart
+    bool missingBars = not na(time[1]) and time - time[1] > 5 * 60 * 1000
+    bool structureBroken = (marketState == STATE_BULLISH and close < lastLow) or (marketState == STATE_BEARISH and close > lastHigh)
+    if missingBars or structureBroken
+        lastHigh := na
+        prevHigh := na
+        lastLow := na
+        prevLow := na
+        structureEpoch := bar_index
+    // A pivot whose origin predates a gap/invalidation cannot restore the trend.
+    if bar_index - swingBars > structureEpoch
+        if not na(ph)
+            prevHigh := lastHigh
+            lastHigh := ph
+        if not na(pl)
+            prevLow := lastLow
+            lastLow := pl
+    bool haveStructure = not na(prevHigh) and not na(lastHigh) and not na(prevLow) and not na(lastLow)
+    bool hh = haveStructure and lastHigh > prevHigh
+    bool hl = haveStructure and lastLow > prevLow
+    bool lh = haveStructure and lastHigh < prevHigh
+    bool ll = haveStructure and lastLow < prevLow
+    marketState := not haveStructure ? STATE_UNKNOWN : hh and hl ? STATE_BULLISH : lh and ll ? STATE_BEARISH : STATE_RANGE
+    if not na(rsi)
+        if rsi >= 15
+            longArmed := true
+        if rsi <= 85
+            shortArmed := true
+
+bool rawBuy = marketState == STATE_BULLISH and rsi < 15
+bool rawSell = marketState == STATE_BEARISH and rsi > 85
+bool suddenDown = close < open and atr > 0 and math.abs(close - open) >= atr * suddenAtrMultiple
+bool suddenUp = close > open and atr > 0 and math.abs(close - open) >= atr * suddenAtrMultiple
+float longStop = not na(lastLow) ? f_floor_tick(lastLow - stopBufferTicks * syminfo.mintick) : na
+float shortStop = not na(lastHigh) ? f_ceil_tick(lastHigh + stopBufferTicks * syminfo.mintick) : na
+bool longStopValid = not na(longStop) and longStop > 0 and longStop < close
+bool shortStopValid = not na(shortStop) and shortStop > close and f_target("SHORT", close, shortStop) > 0
+float pointValue = pointValueOverride > 0 ? pointValueOverride : syminfo.pointvalue
+bool sizingSettingsValid = linearContractVerified and pointValue > 0 and maxQty >= minQty and str.length(instanceIdInput) > 0 and str.length(instanceIdInput) <= 80
+float riskCash = strategy.equity * riskPct / 100.0
+float longLossPerQty = longStopValid ? strategy.convert_to_account((close - longStop) * pointValue) : na
+float shortLossPerQty = shortStopValid ? strategy.convert_to_account((shortStop - close) * pointValue) : na
+float longQty = longLossPerQty > 0 ? f_floor_step(math.min(maxQty, riskCash / longLossPerQty)) : na
+float shortQty = shortLossPerQty > 0 ? f_floor_step(math.min(maxQty, riskCash / shortLossPerQty)) : na
+bool longQtyValid = sizingSettingsValid and not na(longQty) and longQty >= minQty and longQty > 0
+bool shortQtyValid = sizingSettingsValid and not na(shortQty) and shortQty >= minQty and shortQty > 0
+bool flat = strategy.position_size == 0
+bool enterLong = evaluateSignal and supportedChart and flat and longArmed and rawBuy and longStopValid and longQtyValid
+bool enterShort = evaluateSignal and supportedChart and flat and shortArmed and rawSell and shortStopValid and shortQtyValid
+
+
+string decisionReason = not supportedChart ? "STANDARD M5 REQUIRED" :
+     enterLong ? "LONG ORDER CREATED" : enterShort ? "SHORT ORDER CREATED" :
+     marketState == STATE_UNKNOWN or na(rsi) ? "INSUFFICIENT / BROKEN STRUCTURE" :
+     marketState == STATE_RANGE ? "RANGE / CONFLICTING STRUCTURE" :
+     not rawBuy and not rawSell ? "RSI NOT ELIGIBLE" :
+     not flat ? "POSITION OPEN" :
+     not linearContractVerified ? "VERIFY CONTRACT / QUANTITY INPUTS" :
+     (rawBuy and not longArmed) or (rawSell and not shortArmed) ? "EXTREME NOT RESET" :
+     (rawBuy and not longStopValid) or (rawSell and not shortStopValid) ? "INVALID STRUCTURAL STOP" : "SIZE / METADATA REJECTED"
+
+// Read-only snapshots of the first confirmed decision, before order/latch changes.
+// Fill recalculations retain the snapshot; a bar with no decision is unavailable.
+varip int inspectedDecisionBar = na
+varip int inspectedOpenTime = na
+varip string inspectedReason = "WAITING FOR CONFIRMED M5 CLOSE"
+varip float inspectedRsi = na
+varip int inspectedState = na
+varip float inspectedHigh = na
+varip float inspectedLow = na
+varip int inspectedPair = na
+if evaluateSignal
+    inspectedDecisionBar := bar_index
+    inspectedOpenTime := time
+    inspectedReason := decisionReason
+    inspectedRsi := rsi
+    inspectedState := marketState
+    inspectedHigh := lastHigh
+    inspectedLow := lastLow
+    inspectedPair := rawBuy ? 1 : rawSell ? -1 : 0
+bool showHistoricalDecision = showDiagnostics and barstate.isconfirmed and inspectedDecisionBar == bar_index
+plot(showHistoricalDecision ? inspectedRsi : na, "Decision RSI", display = display.data_window)
+plot(showHistoricalDecision ? inspectedState : na, "Decision trend (1=bull, -1=bear, 2=range, 0=unknown)", display = display.data_window)
+plot(showHistoricalDecision ? inspectedHigh : na, "Decision swing high", display = display.data_window)
+plot(showHistoricalDecision ? inspectedLow : na, "Decision swing low", display = display.data_window)
+plot(showHistoricalDecision ? inspectedPair : na, "Decision RSI pair (1=BUY, -1=SELL, 0=none)", display = display.data_window)
+// End read-only historical diagnostics.
+
+if enterLong or enterShort
+    activeSide := enterLong ? "LONG" : "SHORT"
+    activeTradeId := (enterLong ? "L-" : "S-") + str.tostring(time_close)
+    activeSignalTime := time_close
+    activeSignalPrice := close
+    activeSignalRsi := rsi
+    activeSignalState := marketState
+    activeSudden := enterLong ? suddenDown : suddenUp
+    activeStop := enterLong ? longStop : shortStop
+    activeTarget := f_target(activeSide, close, activeStop)
+    activeFill := na
+    activeRiskBudget := riskCash
+    string entryMessage = f_payload("ENTRY", activeSide, activeTradeId, activeSignalTime, close, activeStop, activeTarget, rsi, marketState, activeSudden)
+    string exitMessage = f_payload("EXIT", activeSide, activeTradeId, activeSignalTime, close, activeStop, activeTarget, rsi, marketState, activeSudden)
+    if enterLong
+        longArmed := false
+        strategy.entry("L", strategy.long, qty = longQty, alert_message = entryMessage)
+        strategy.exit("L-X", from_entry = "L", stop = activeStop, limit = activeTarget, alert_message = exitMessage)
+    else
+        shortArmed := false
+        strategy.entry("S", strategy.short, qty = shortQty, alert_message = entryMessage)
+        strategy.exit("S-X", from_entry = "S", stop = activeStop, limit = activeTarget, alert_message = exitMessage)
+
+// Seed protection accompanies order creation. On the first fill calculation,
+// freeze one corrected target from the actual simulated fill, including slippage.
+// This calculation cannot create entries, re-arm extremes, or update structure.
+if strategy.position_size != 0 and not na(activeStop)
+    if na(activeFill)
+        activeFill := strategy.position_avg_price
+        activeTarget := f_target(activeSide, activeFill, activeStop)
+    bool invalidFillStop = activeSide == "LONG" ? activeFill <= activeStop : activeFill >= activeStop
+    float filledRisk = strategy.convert_to_account(math.abs(activeFill - activeStop) * pointValue * math.abs(strategy.position_size))
+    bool fillRiskRejected = na(filledRisk) or filledRisk > activeRiskBudget * (1 + maxFillRiskOverrunPct / 100.0)
+    string protectiveMessage = f_payload("EXIT", activeSide, activeTradeId, activeSignalTime, activeSignalPrice, activeStop, activeTarget > 0 ? activeTarget : na, activeSignalRsi, activeSignalState, activeSudden)
+    if invalidFillStop or fillRiskRejected or activeTarget <= 0
+        strategy.cancel(activeSide == "LONG" ? "L-X" : "S-X")
+        strategy.close(activeSide == "LONG" ? "L" : "S", immediately = true, comment = "Invalid fill risk", alert_message = protectiveMessage)
+    else if activeSide == "LONG"
+        strategy.exit("L-X", from_entry = "L", stop = activeStop, limit = activeTarget, alert_message = protectiveMessage)
+    else
+        strategy.exit("S-X", from_entry = "S", stop = activeStop, limit = activeTarget, alert_message = protectiveMessage)
+
+// New-entry gates never disable protection. Pine cannot observe MT5 account state;
+// MT5's actual position and broker-side bracket remain authoritative there.
+plot(strategy.position_size != 0 ? activeStop : na, "Active stop", color.red, style = plot.style_linebr, linewidth = 2)
+plot(strategy.position_size != 0 ? activeTarget : na, "Active 2R target", color.green, style = plot.style_linebr, linewidth = 2)
+plotshape(showCandidates and supportedChart and barstate.isconfirmed and rawBuy, title = "BUY candidate", style = shape.triangleup, location = location.belowbar, size = size.tiny, color = color.green, text = "RSI<15")
+plotshape(showCandidates and supportedChart and barstate.isconfirmed and rawSell, title = "SELL candidate", style = shape.triangledown, location = location.abovebar, size = size.tiny, color = color.red, text = "RSI>85")
+bgcolor(not supportedChart ? color.new(color.red, 90) : na)
+
+varip int gateChart = 0
+varip int gateUnknown = 0
+varip int gateRange = 0
+varip int gateRsi = 0
+varip int gatePosition = 0
+varip int gateReset = 0
+varip int gateStop = 0
+varip int gateSize = 0
+varip int gateEntries = 0
+if evaluateSignal
+    if not supportedChart
+        gateChart += 1
+    else if marketState == STATE_UNKNOWN or na(rsi)
+        gateUnknown += 1
+    else if marketState == STATE_RANGE
+        gateRange += 1
+    else if not rawBuy and not rawSell
+        gateRsi += 1
+    else if not flat
+        gatePosition += 1
+    else if not enterLong and not enterShort and ((rawBuy and not longArmed) or (rawSell and not shortArmed))
+        gateReset += 1
+    else if (rawBuy and not longStopValid) or (rawSell and not shortStopValid)
+        gateStop += 1
+    else if (rawBuy and not longQtyValid) or (rawSell and not shortQtyValid)
+        gateSize += 1
+    if enterLong or enterShort
+        gateEntries += 1
+
+string reason = inspectedReason
+var table diag = table.new(position.top_right, 2, 13, border_width = 1)
+// Populate tables on every calculation, including historical loading.
+// Display updates do not affect the confirmed-bar entry decision guard.
+// Explicit colors keep diagnostics readable on both light and dark charts.
+// Feed metadata is displayed separately so contract review does not depend on
+// guessing the units from the chart's price or the strategy's input defaults.
+f_diag_cell(table panel, int column, int row, string value) =>
+    table.cell(panel, column, row, value, text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+var table contractDiag = table.new(position.bottom_left, 2, 6, border_width = 1)
+if showDiagnostics
+    f_diag_cell(contractDiag, 0, 0, "Chart feed v1.5")
+    f_diag_cell(contractDiag, 1, 0, syminfo.tickerid)
+    f_diag_cell(contractDiag, 0, 1, "Feed point value")
+    f_diag_cell(contractDiag, 1, 1, f_num(syminfo.pointvalue))
+    f_diag_cell(contractDiag, 0, 2, "Feed minimum quantity")
+    f_diag_cell(contractDiag, 1, 2, f_num(syminfo.mincontract))
+    f_diag_cell(contractDiag, 0, 3, "Quote currency / tick")
+    f_diag_cell(contractDiag, 1, 3, syminfo.currency + " / " + f_num(syminfo.mintick))
+    f_diag_cell(contractDiag, 0, 4, "Input step / min / max")
+    f_diag_cell(contractDiag, 1, 4, f_num(qtyStep) + " / " + f_num(minQty) + " / " + f_num(maxQty))
+    f_diag_cell(contractDiag, 0, 5, "Contract confirmation")
+    f_diag_cell(contractDiag, 1, 5, linearContractVerified ? "CHECKED BY USER" : "UNCHECKED - ENTRIES BLOCKED")
+if showDiagnostics
+    table.cell(diag, 0, 0, "RSI Trend v1.5", text_color = color.white, bgcolor = color.blue)
+    table.cell(diag, 1, 0, supportedChart ? "M5 OK" : "BLOCKED", text_color = color.white, bgcolor = supportedChart ? color.green : color.red)
+    table.cell(diag, 0, 1, "Market state", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 1, f_state_name(inspectedState), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 2, "RSI (last close)", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 2, na(inspectedRsi) ? "Unavailable" : str.tostring(inspectedRsi, "0.00"), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 3, "Reason", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 3, reason, text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 4, "Swing H / L", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 4, f_num(inspectedHigh) + " / " + f_num(inspectedLow), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 5, "Stop / 2R target", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 5, f_num(activeStop) + " / " + f_num(activeTarget), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 6, "Wrong chart", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 6, str.tostring(gateChart), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 7, "Unknown / range", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 7, str.tostring(gateUnknown) + " / " + str.tostring(gateRange), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 8, "RSI blocked", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 8, str.tostring(gateRsi), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 9, "Position / reset blocked", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 9, str.tostring(gatePosition) + " / " + str.tostring(gateReset), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 10, "Stop / size blocked", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 10, str.tostring(gateStop) + " / " + str.tostring(gateSize), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 11, "Entry orders", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 11, str.tostring(gateEntries), text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 0, 12, "Decision bar (UTC)", text_color = color.white, bgcolor = color.rgb(24, 28, 36))
+    table.cell(diag, 1, 12, na(inspectedOpenTime) ? "Waiting" : str.format_time(inspectedOpenTime, "yyyy-MM-dd HH:mm", "UTC"), text_color = color.white, bgcolor = color.rgb(24, 28, 36))

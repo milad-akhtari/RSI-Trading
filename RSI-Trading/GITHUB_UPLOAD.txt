@@ -1,0 +1,31 @@
+GitHub review upload
+====================
+
+Repository: https://github.com/milad-akhtari/RSI-Trading
+
+The connected GitHub app could read this repository but its create-file request
+returned HTTP 403: Resource not accessible by integration on September 30, 2026.
+No remote branch, commit or pull request was created by that attempt.
+
+Manual upload:
+1. Extract RSI-Trading-GitHub-Review.zip into a NEW folder. Keep your existing
+   Windows installation and its .env file separate.
+2. Open the repository URL above while signed into your GitHub account.
+3. For an empty repository, click "uploading an existing file". Otherwise use
+   Add file > Upload files.
+4. Drag the CONTENTS of the extracted RSI-Trading folder onto the upload page.
+   Include .github, .gitignore and .env.example; there is no real .env here.
+   Upload the extracted files, rather than the ZIP itself.
+5. Commit with the message "Upload RSI strategy and zero-trade review".
+6. Send your friend the repository link. Ask them to start with
+   docs/zero-trade-review.md.
+
+The archive contains source, test cases, market-only OHLC samples and the replay
+report. It does not contain a real .env, passwords, account databases, runtime
+logs or Python environments. Broker orders remain disabled.
+
+If you prefer the assistant to publish instead, review the GitHub connection's
+repository access in ChatGPT Settings > Apps > GitHub and the installed GitHub
+application's configuration. This repository must be included. A 403 may also
+reflect the integration's available write permissions, so repository selection
+alone may not fix it. Do not paste an access token or password into chat.

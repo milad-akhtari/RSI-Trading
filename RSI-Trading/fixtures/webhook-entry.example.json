@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.1",
+  "strategy": "RSI Trend Strategy",
+  "instance_id": "EXAMPLE-M5-DEMO",
+  "event_id": "rsi-trend|EXAMPLE-M5-DEMO|EXAMPLE:GBPUSD|5|L-1790721000000|ENTRY|LONG",
+  "event_type": "ENTRY",
+  "side": "LONG",
+  "ticker": "EXAMPLE:GBPUSD",
+  "timeframe": "5",
+  "signal_time_ms": 1790721000000,
+  "signal_price": 1.25,
+  "structural_stop": 1.249,
+  "planned_target": 1.252,
+  "chart_tick_size": 1e-05,
+  "rr": 2.0,
+  "risk_pct": 1.0,
+  "rsi": 14.0,
+  "market_state": "BULLISH",
+  "strength": "BASELINE",
+  "trade_id": "L-1790721000000"
+}

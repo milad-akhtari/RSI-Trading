@@ -1,0 +1,23 @@
+{
+  "scope": "User screenshot observation at one historical candle; rounded RSI agreement, not full Pine parity or profitability",
+  "observed_on_local_date": "2026-09-30",
+  "strategy_version": "1.4",
+  "ticker": "CAPITALCOM:US30",
+  "timeframe_minutes": 5,
+  "selected_bar_open_utc": "2026-09-30T11:15:00+00:00",
+  "builtin_rsi_display": 9.26,
+  "strategy_decision_rsi_display": 9.3,
+  "decision_state_code": -1,
+  "decision_state": "BEARISH",
+  "decision_pair_code": 0,
+  "swing_high": 51451.7,
+  "swing_low": 51390.2,
+  "selected_close": 51256.7,
+  "conclusion": "RSI below15 matches after rounding; BUY rejected because the required bullish structural state is absent",
+  "not_inferred": [
+    "Exact historical low was7.71",
+    "Strategy is profitable",
+    "All prior manual trend selections match",
+    "Orders or broker fills verified"
+  ]
+}

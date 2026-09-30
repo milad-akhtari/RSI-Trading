@@ -1,0 +1,61 @@
+{
+  "scope": "Entry-condition audit only; no position/latch/sizing/fill/cost or P&L simulation; native Pine parity unverified",
+  "input": {
+    "filename": "US30_M5_history.csv",
+    "sha256": "b51c9378c36a46ec7b2a3930df96dcec9df6d997c28a2dfb48deab403d089ccf",
+    "rows": 20000,
+    "first_bar_open_utc": "2026-06-18T14:50:00+00:00",
+    "last_bar_open_utc": "2026-09-30T05:30:00+00:00",
+    "timestamp_interpretation": "Exported Unix seconds, interpreted as UTC without shifting"
+  },
+  "settings": {
+    "rsi_length": 9,
+    "source": "close",
+    "swing_bars": 2,
+    "pivot_tie_policy": "latest",
+    "rsi_smoothing": "Wilder RMA seeded from first length close/source changes",
+    "flat_seed_policy": "Unavailable until movement; native flat-seed behavior not claimed",
+    "buy_below": 15,
+    "sell_above": 85,
+    "structure_reset": "Close break or gap >300 seconds"
+  },
+  "states": {
+    "UNKNOWN": 8820,
+    "BULLISH": 3694,
+    "BEARISH": 3453,
+    "RANGE": 4033
+  },
+  "gates": {
+    "unknown": 8820,
+    "rsi": 7147,
+    "range": 4033
+  },
+  "resets": {
+    "gap_resets": 80,
+    "structure_break_resets": 432
+  },
+  "gap_seconds": {
+    "3900": 58,
+    "191100": 2,
+    "180300": 13,
+    "2700": 1,
+    "600": 5,
+    "18300": 1
+  },
+  "extremes": {
+    "below_15": 150,
+    "above_85": 121,
+    "by_state": {
+      "above_85:UNKNOWN": 37,
+      "below_15:BEARISH": 66,
+      "below_15:UNKNOWN": 76,
+      "above_85:RANGE": 21,
+      "above_85:BULLISH": 63,
+      "below_15:RANGE": 8
+    }
+  },
+  "bullish_min_rsi": 18.836896157970727,
+  "bearish_max_rsi": 82.58670201480687,
+  "qualifying_bars": 0,
+  "candidates": []
+}

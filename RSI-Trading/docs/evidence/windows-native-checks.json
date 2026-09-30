@@ -1,0 +1,66 @@
+{
+  "native_us30": {
+    "observed_local_date": "2026-09-29",
+    "server": "MetaQuotes-Demo",
+    "scope": "User screenshots of native read-only sizing, no broker orders",
+    "offset_seconds": 10800,
+    "LONG": {
+      "status": "DRY_RUN_DEMO",
+      "volume": 0.1,
+      "entry_quote": 51561.2,
+      "sl": 51461.2,
+      "tp": 51761.2,
+      "risk_cash_budget": 10,
+      "risk_pct_after_rounding": 1,
+      "margin_required": 25.78,
+      "normalized_quote_time_ms": 1790741373387
+    },
+    "SHORT": {
+      "status": "DRY_RUN_DEMO",
+      "volume": 0.1,
+      "entry_quote": 51563.5,
+      "sl": 51663.5,
+      "tp": 51363.5,
+      "risk_cash_budget": 10,
+      "risk_pct_after_rounding": 1,
+      "margin_required": 25.78,
+      "normalized_quote_time_ms": 1790741455132
+    },
+    "broker_writes_blocked": true,
+    "settings_file_changed": false
+  },
+  "gateway_startup": {
+    "observed_local_date": "2026-09-29",
+    "health": {
+      "ok": true,
+      "execution_mode": "demo",
+      "demo_order_submission_enabled": false,
+      "live_trading_enabled": false,
+      "new_entries_enabled": false,
+      "entries_paused_for_reconciliation": false
+    },
+    "worker_evidence": "automation.worker log rejected previously queued LOCAL-RECEIPT event: EXAMPLE:GBPUSD is not mapped to an allowed MT5 symbol",
+    "orders_sent": false
+  },
+  "entry_pause": {
+    "event_id": "GATE-PAUSE-53683f41000449cc854382086a812fff",
+    "accepted": true,
+    "duplicate": false,
+    "status": "FAILED",
+    "attempts": 1,
+    "last_error": "New entries are paused by NEW_ENTRIES_ENABLED=false",
+    "result": null,
+    "observed_local_date": "2026-09-29",
+    "scope": "Local authenticated webhook received, processed by native Windows worker and stored; entry pause gate rejected before quote/sizing/order execution",
+    "status_reread_observed": true,
+    "status_reread_attempts": 1,
+    "restart_requested": true,
+    "restart_terminal_shown": false
+  },
+  "remaining": [
+    "Original RSI/trend definition and valid historical US30 entry",
+    "US30 webhook-to-worker dry run",
+    "Public HTTPS and TradingView alert delivery",
+    "Native order/fill/protection and interrupted-order recovery"
+  ]
+}
